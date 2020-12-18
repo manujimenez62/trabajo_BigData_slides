@@ -1,0 +1,525 @@
+---
+title: "Evolución y Curiosidades de los Juegos Olímpicos"
+subtitle: "Antonio Langa Lahoz, Manuel Rojo López y Manuel Jiménez Haro."
+author: "Universitat de València."
+date: "Diciembre de 2020"
+output: ioslides_presentation
+logo: ./imagenes/aros.jpg
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r packages-setup, include = FALSE}
+library(tidyverse)
+library(klippy)  #- remotes::install_github("rlesur/klippy")
+library(knitr)
+library(highcharter)
+library(gganimate)
+library(ggplot2)
+library(RColorBrewer)
+library(patchwork)
+library(plotly)
+library(robservable)
+library(gt)
+library(ggthemes)
+```
+
+```{r, echo=FALSE}
+#importamos 
+athletes <- rio::import("./datos/ath.csv")
+
+#importamos directamente el dataset con datos de verano y medallas
+df_summer_medals <- rio::import(here::here("datos", "df_summer_medals.csv"))
+
+```
+
+## Introducción
+
+
+- Los Juegos Olímpicos, son el mayor evento deportivo del mundo. En él participan atletas de diversas partes del mundo y son considerados como el evento deportivo con más participantes, con más de doscientas naciones participantes.
+
+- Existen dos tipos, los de verano y los de invierno, sin embargo, nosotros vamos a centrarnos en los de verano.
+
+![](https://media.tenor.com/images/24a89f371e899cbff3f8a6eb78edd1c9/tenor.gif)
+
+
+---- 
+
+```{r, include=TRUE, eval=TRUE}
+df_1 <- df_summer_medals %>% mutate(M = case_when(
+                               is.na(Medal) ~ 0,
+                               TRUE ~ 1)) %>%
+                           select(Year, M, region) %>%
+                           group_by(region, Year) %>%
+                           summarise(Medallas_anyo = sum(M))%>%
+                           arrange(region)
+
+
+#grafica con robservable de https://observablehq.com/@juba/bar-chart-race
+
+df_race <- df_1  %>% mutate(value = cumsum(Medallas_anyo)) %>%
+                     rename(id = region, date = Year) %>%
+                     arrange(date) %>%
+                     select(-Medallas_anyo)
+
+#añadimos años del boicot y alemania
+z <- data.frame(id = c("USA","Russia","Germany", "Germany", "Germany"),
+              date = c(1980, 1984, 1920, 1924, 1948),
+              value = c(2626,1780, 197, 197, 541))
+
+datos <- rbind(df_race,z)
+
+df_race_1 <- datos %>% arrange(date)
+
+
+robservable(
+  "https://observablehq.com/@juba/bar-chart-race",
+  include = c("viewof date", "chart", "draw", "styles"),
+  hide = "draw",
+  input = list(
+    data = df_race_1, 
+    title = "Evolución de las medallas",
+    subtitle = "Juegos Olímpicos de verano de 1896 a 2016",
+    source = "Fuente: 120 years of Olympic history: athletes and results"
+  ),
+  width = 700,
+  height = 710
+)
+```
+
+## Evolución top 5 paises
+
+```{r, include=TRUE, eval=TRUE}
+
+a_top<- df_1%>% group_by(region) %>% summarise(n = sum(Medallas_anyo)) %>% arrange(desc(n)) %>% ungroup() %>% slice_max(n, n=5)
+
+df_top <- df_1 %>% filter(region %in% c("USA","Russia","UK", "France", "Germany"))
+
+
+
+p <- ggplot(df_top, aes(Year, Medallas_anyo, color = region)) + geom_line() + theme_solarized() + facet_grid(rows = vars(region)) +
+labs(title = "Evolución de los top 5 Países con más medallas",
+    subtitle = "Juegos Olímpicos de verano de 1896 a 2016",
+    caption = "Fuente: 120 years of Olympic history: athletes and results",
+    x = "Años",
+    y = "Número de Medallas por año") + theme(legend.position = "none")
+
+
+p
+
+```
+
+
+---
+
+- Debido a las tensiones de la Guerra Fría, Estados Unidos decidió no asistir a los Juegos Olímpicos de Moscú de 1980, como respuesta, en 1984 la URSS decidió hacer lo mismo en los Juegos Olímpicos que se celebraban en Los Ángeles.
+
+```{r,  include=TRUE, eval=TRUE}
+#mapa boicot 1980 y 1984
+world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+
+#- quito Antarctica y Groenlandia
+world <- world %>% filter(subregion != "Antarctica") %>% filter(admin != "Greenland")
+
+
+df_mapa_boicot <- df_summer_medals %>% filter(Year %in% c("1980", "1984")) %>%
+                                group_by(region, Year) %>%
+                                summarise(n = n())
+
+world_3 <- world %>% mutate(admin = case_when(
+  admin == "The Bahamas" ~ "Bahamas",
+  admin == "Republic of Serbia" ~ "Serbia",
+  admin == "Trinidad and Tobago" ~ "Trinidad",
+  admin == "United Kingdom" ~ "UK",
+  admin == "United States of America" ~ "USA",
+  TRUE  ~  admin ))
+
+df_join_2 <- left_join(df_mapa_boicot , world_3, by = c("region" = "admin"))
+
+df_world_3 <- df_join_2 %>% select(region, n, Year, geometry)
+
+ggplot() + geom_sf(data = world, mapping = aes(geometry = geometry)) + geom_sf(df_world_3, mapping = aes(geometry = geometry, fill = n)) + facet_grid(rows = vars(Year))  + theme_light() + theme( panel.background = element_rect(fill = "aliceblue")) +
+  labs(title = "Medallas conseguidas durante el Boicot Americano y el Ruso",
+    subtitle = "Juegos Olímpicos de verano de 1896 a 2016",
+    caption = "Fuente: 120 years of Olympic history: athletes and results",
+    color = "Medallas") + scale_fill_viridis_c(option="plasma")
+```
+
+## Atletas con más medallas
+
+
+```{r}
+
+#atletas más medallas
+aa <- df_summer_medals %>% select(-c( Height, Weight, Team, NOC, Games, Season, notes)) %>%          group_by(ID)%>%
+            mutate(Medallas = n())%>%
+            arrange(desc(Medallas))%>%
+            distinct(Name, .keep_all = TRUE)%>%
+            ungroup() %>%
+            slice_max(Medallas, n = 30)
+
+aa <- aa %>% mutate(Name = forcats::as_factor(Name)) %>%
+             mutate(Name = forcats::fct_reorder(Name,Medallas))
+
+ggplot(aa,aes(Name,Medallas,color = Name,fill= Name)) +
+  geom_bar(position = "stack",  width =.6,stat="identity") +
+  coord_flip()+
+  geom_text(aes(label= Medallas ,hjust=-.03,  colour="black"),size=3) +
+  geom_text(aes(label= region), position = position_stack(vjust= 0.5),
+            colour = "grey30", size = 3) +
+  theme(axis.line = element_line(color = "green",size=1))+
+      theme(panel.background=element_blank())+
+      scale_x_discrete() +
+    xlab("Atleta")+ylab("Medallas")+
+  theme(legend.position = "none",
+                     axis.text = element_text(size = 8,face="bold"),
+        plot.title = element_text(size=16,face = "bold")) +
+  ggtitle("Atletas con más medallas olímpicas " ,subtitle = "Juegos Olímpicos de verano de 1896 a 2016")
+
+```
+
+
+
+# 100 metros
+
+## Distribución de los tiempos por género
+
+```{r, echo=FALSE}
+df_results <- rio::import(here::here("datos", "df_results.csv"))
+```
+
+```{r, include=TRUE, eval=TRUE}
+df_100M <- df_results%>% filter(prueba == "100M", gender == "M") %>% arrange(year)
+
+df_100M_muj_y_hom <- df_results %>% filter(prueba == "100M")
+
+ggplot(df_100M_muj_y_hom, aes(x = mark_xx, fill = gender)) +
+        geom_histogram(aes(y = ..count..), position="identity", alpha=0.6) + scale_x_continuous(name = "Tiempo") +
+  scale_y_continuous(name = "Número de atletas") +
+  ggtitle("Distribución de los tiempos en 100 metros") +
+  theme_bw() +
+  theme(axis.line = element_line(size=1, colour = "black"),
+              panel.grid.major = element_line(colour = "#d3d3d3"),
+              panel.grid.minor = element_blank(),
+              panel.border = element_blank(), panel.background = element_blank(),
+              plot.title = element_text(size = 14, family = "Tahoma", face = "bold"),
+              text=element_text(family="Tahoma"),
+              axis.text.x=element_text(colour="black", size = 9),
+              axis.text.y=element_text(colour="black", size = 9)) +
+        scale_fill_brewer(palette="Accent") + labs(color = "Género")
+
+```
+
+## Atletas que han ganado oro
+
+```{r,  include=TRUE, eval=TRUE}
+df_results <- rio::import(here::here("datos", "df_results.csv"))
+
+df_100M_muj_y_hom <- df_results %>% filter(prueba == "100M")
+
+df_100M_oro <- df_100M_muj_y_hom %>% filter(medal == "G") %>% mutate(gender = case_when(
+  gender == "M" ~ "Hombre",
+  gender == "W" ~ "Mujer"))
+
+p1 <- ggplot(df_100M_oro, aes(year, mark_xx, color = gender)) + geom_line() + geom_point(aes (color = name)) + theme_light() +
+labs(title = "Evolución de los tiempos de los ganadores de 100 metros",
+    subtitle = "Juegos Olímpicos de verano de 1896 a 2016",
+    caption = "Fuente:Olympic Track & Field Results",
+    x = "Año",
+    y = "Tiempo",
+    color = "Género y Atleta",
+    tag = "Plot 1") +
+  scale_fill_distiller(palette = "RdYlBu") + theme(axis.line = element_line(colour = "blue4"),
+    axis.ticks = element_line(colour = "blue4"),
+    panel.grid.major = element_line(colour = "ivory1"),
+    legend.title = element_text(colour = "brown"),
+    panel.background = element_rect(fill = "antiquewhite",
+        colour = "antiquewhite1"), plot.background = element_rect(fill = "wheat2"),
+    legend.background = element_rect(colour = "antiquewhite1"))
+
+
+ggplotly(p1)
+```
+
+# Lanzamiento de Disco y Martillo
+
+## Relación entre Peso y Martillo y Disco
+
+```{r, include=TRUE, eval=TRUE}
+#fusionando para ver peso en pruebas de disco
+
+aa_1 <- df_results %>% filter(prueba %in% c("Discus Throw"), gender == "M") %>% arrange(year) %>%
+                       mutate(medal = case_when(
+  medal == "G" ~ "Gold",
+  medal == "S" ~ "Silver",
+  medal == "B" ~ "Bronze",
+  TRUE  ~  name ))
+
+bb_1 <- df_summer_medals %>% filter(Event %in% c("Athletics Men's Discus Throw"))%>% arrange(Year)
+
+df_disco <- left_join(aa_1, bb_1, by = c("nationality" = "NOC", "medal" = "Medal", "year" = "Year"))
+
+
+p_2 <- ggplot(df_disco, aes(x = mark_xx, y = Weight, color = year )) +
+  geom_point() +
+  geom_smooth(color = "cyan4") +
+  theme_bw() +
+  labs(title = "Peso y Lanzamiento de Disco",
+    subtitle = "Juegos Olímpicos de verano de 1896 a 2016",
+    caption = "Fuente: Olympic Track & Field Results",
+    x = "Marca",
+    y = "Peso",
+    color = "Año") + scale_color_gradient(low = "yellow", high = "red", na.value = NA) + theme(axis.line = element_line(colour = "blue4"),
+    axis.ticks = element_line(colour = "blue4"),
+    panel.grid.major = element_line(colour = "ivory1"),
+    legend.title = element_text(colour = "brown"),
+    panel.background = element_rect(fill = "antiquewhite",
+        colour = "antiquewhite1"), plot.background = element_rect(fill = "wheat2"),
+    legend.background = element_rect(colour = "antiquewhite1"))
+
+
+#fusionando para ver peso y martillo
+
+aa_2 <- df_results %>% filter(prueba %in% c("Hammer Throw"), gender == "M") %>% arrange(year) %>%
+                       mutate(medal = case_when(
+  medal == "G" ~ "Gold",
+  medal == "S" ~ "Silver",
+  medal == "B" ~ "Bronze",
+  TRUE  ~  name ))
+
+bb_2 <- df_summer_medals %>% filter(Event %in% c("Athletics Men's Hammer Throw"))%>% arrange(Year)
+
+df_mart <- left_join(aa_2, bb_2, by = c("nationality" = "NOC", "medal" = "Medal", "year" = "Year"))
+
+
+df_mart <- df_mart[-c(39), ]
+
+p_3 <- ggplot(df_mart, aes(x = mark_xx, y = Weight, color = year )) +
+  geom_point() +
+  geom_smooth(color = "cyan4") +
+  theme_bw() +
+  labs(title = "Peso y Lanzamiento de Martillo",
+    subtitle = "Juegos Olímpicos de verano de 1896 a 2016",
+    caption = "Fuente: Olympic Track & Field Results",
+    x = "Marca",
+    y = "Peso",
+    color = "Año") + scale_color_gradient(low = "yellow", high = "red", na.value = NA) + theme(axis.line = element_line(colour = "blue4"),
+    axis.ticks = element_line(colour = "blue4"),
+    panel.grid.major = element_line(colour = "ivory1"),
+    legend.title = element_text(colour = "brown"),
+    panel.background = element_rect(fill = "antiquewhite",
+        colour = "antiquewhite1"), plot.background = element_rect(fill = "wheat2"),
+    legend.background = element_rect(colour = "antiquewhite1")) + annotate(geom = "text", x = 82.91, y = 98, label = "record", hjust = "up")
+
+
+#combinando gráficos disco y martillo
+p_2 + p_3 + plot_layout(ncol = 2)
+
+```
+
+# URSS: Antes y después
+
+## URSS: Antes y después
+```{r, include=TRUE, eval=TRUE}
+#URSS BUENA
+
+df_summer_medals <- rio::import(here::here("datos", "df_summer_medals.csv"))
+
+df_urss <- df_summer_medals %>% filter(NOC %in% c("URS","EUN")) %>%
+  arrange(Year) %>%
+  group_by(Year) %>%
+  summarise(nn = n())
+
+p <- ggplot(df_urss, aes(x =Year, y= nn, fill= "red")) + geom_col() + ylim(c(NA, 500))+ labs(title = "Gráfico URSS: Medallas totales de la URSS",
+       subtitle = "(antes de su disolución en 1992)",
+       x = "Años",
+       y = "Medallas totales")
+
+df_urss_post <- df_summer_medals %>% filter(NOC %in% c("EST", "RUS", "UKR", "GEO", "BLR", "AZE", "UZB", "TJK", "POL", "LTU", "ROU", "ARM" )) %>%
+  filter(Year > 1992) %>%
+  arrange(Year) %>%
+  group_by(Year, NOC) %>%
+  summarise(n = n()) %>%
+  group_by(Year) %>%
+  mutate(nn = sum(n))
+
+p2 <- ggplot(df_urss_post, aes(x =Year, y= nn, fill = "red")) + stat_summary(geom="bar", position=position_stack()) + ylim(c(NA, 500)) +
+  labs(title = "Gráfico URSS: Medallas totales de la URSS",
+       subtitle = "(antes de su disolución en 1992)",
+       x = "Años",
+       y = "Medallas totales")
+
+#fusionando dataframes
+df_urss_tot <- full_join(df_urss, df_urss_post)
+
+p3 <- ggplot(df_urss_tot, aes(x =Year, y= nn, fill = "red")) + stat_summary(geom="bar", position=position_stack())
+
+p3 +  ylim(c(NA, 500)) + labs(title = "Gráfico URSS: Medallas totales de la URSS", subtitle = "Año 1900 hasta 2016", x = "Años",
+                              y = "Medallas totales")+ theme(axis.line = element_line(color = "orange",size=1))+ theme(legend.position = "none")+ theme_solarized()+ theme(legend.position = "none") + geom_vline(xintercept = 1994)
+
+
+```
+
+# Las Mujeres en los Juegos Olímpicos
+
+## Participación de mujeres
+
+```{r,  include=TRUE, eval=TRUE}
+
+library(ggthemes)
+
+athletes <- rio::import(here::here("datos", "ath.csv"))
+
+df_mujeres <- athletes %>% 
+  filter(Sex=="F")%>%
+  group_by(Season, Year) %>%
+  summarise(nn = n())
+
+p <- ggplot(df_mujeres, aes(Year,nn, color= Season))+ geom_point()+ geom_line()
+
+  
+p + labs(title = "Participación mujeres atletas en JJOO",
+       subtitle = "Desde 1990 hasta 2016" ,
+       x = "Años",
+       y = "Participación")+ theme(axis.line = element_line(color = "orange",size=1))+ theme(panel.background=element_blank())+ 
+  theme(legend.position = "none",
+        axis.text = element_text(size = 8,face="bold"),
+        plot.title = element_text(size=16,face = "bold"))+ theme_solarized()
+```
+
+
+
+## Comparación continentes
+
+```{r,  include=TRUE, eval=TRUE}
+
+athletes <- rio::import(here::here("datos", "ath.csv"))
+
+df_mujeres <- athletes %>% 
+  filter(Sex=="F")%>%
+  select(Sex, Year, Team, Season)
+
+df_mujeres2 <- athletes %>% 
+  filter(Sex=="F")%>%
+  group_by(Season, Year,Team) %>%
+  summarise(nn = n())
+
+
+df_mujeres3 <- df_mujeres2 %>% filter(Team %in% c("Spain", "Netherlands", "Finland", "Italy", "Portugal","Canada","Cuba","Brazil","United States","Colombia","China","India","Japon","South Korea","North Korea","Australia","New Zealand","Fiji","Papua New Guinea","Samoa","Egypt","South Africa", "Nigeria", "	
+Kenya","Cameroon"))
+
+df_mujeres4 <- df_mujeres3 %>%  mutate(CONTINENTES= case_when(
+  Team == "Spain" ~ "Europa",
+  Team == "Netherlands" ~ "Europa",
+  Team == "Finland" ~ "Europa",
+  Team == "Italy" ~ "Europa",
+  Team =="Portugal"~ "Europa",
+  Team == "Canada" ~ "America",
+  Team == "Cuba" ~ "America",
+  Team == "Brazil" ~ "America",
+  Team == "United States"~ "America",
+  Team == "Colombia"~ "America",
+  Team == "India" ~ "Asia",
+  Team == "Japon" ~ "Asia",
+  Team == "South Korea" ~ "Asia",
+  Team == "North Korea" ~ "Asia",
+  Team == "China" ~ "Asia",
+  Team == "Australia"  ~ "Oceanía",
+  Team == "New Zealand"~ "Oceanía",
+  Team == "Fiji"~ "Oceanía",
+  Team == "Papua New Guinea"~ "Oceanía",
+  Team == "Samoa" ~ "Oceanía",
+  Team == "Cameroon" ~ "Africa",
+  Team == "Kenya" ~ "Africa",
+  Team == "Egypt"~ "Africa", 
+  Team == "South Africa"~ "Africa",
+  Team == "Nigeria"~ "Africa"))
+
+
+library(gghighlight)
+
+ggplot(df_mujeres4 , aes(x = Year,  y = nn, color= CONTINENTES))+ geom_point() + ylim(c(NA, 500)) + 
+  labs(title = "Participacion de la mujer por continentes", subtitle = "Año 1900 hasta 2016", x = "Años",
+       y = "Atletas")+ theme(axis.line = element_line(color = "orange",size=1))+
+  theme(panel.background=element_blank())+
+  theme(axis.text = element_text(size = 8,face="bold"),
+        plot.title = element_text(size=16,face = "bold"))+  gghighlight::gghighlight() + 
+  facet_wrap(vars(CONTINENTES))+ theme_solarized()
+```
+
+# Curiosidades 
+
+## Paises Mediterraneos
+
+```{r,  include=TRUE, eval=TRUE}
+df_2 <- df_summer_medals %>%
+  filter(Year > 1948) %>% mutate(M = case_when(
+  is.na(Medal) ~ 0,
+  TRUE ~ 1)) %>%
+  select(Year, M, region) %>%
+  group_by(region, Year) %>%
+  summarise(Medallas_anyo = sum(M))%>%
+  arrange(region)
+
+Mediterráneo <- df_2 %>% filter(region %in% c("Spain", "Portugal", "Italy", "Greece"))
+
+mediterrania <- ggplot(Mediterráneo, aes(x=Year, y=Medallas_anyo, group=region, color=region)) +
+  geom_point() +
+  geom_line() +
+  scale_color_manual(values=c("darkblue","red", "gold", "green"))  +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title="Como han crecido nuestro compañeros")
+
+mediterrania + geom_vline(aes(xintercept=1960), color="#990000", linetype="dashed")+ geom_vline(aes(xintercept=1992), color="brown", linetype="dashed") + geom_vline(aes(xintercept=2004), color="brown", linetype="dashed")
+
+```
+
+## Korea
+
+```{r,  include=TRUE, eval=TRUE}
+korea <- df_summer_medals %>%
+  filter(Year > 1970) %>% mutate(M = case_when(
+  is.na(Medal) ~ 0,
+  TRUE ~ 1)) %>%
+  group_by(region, Year) %>%
+  summarise(Medallas_anyo = sum(M))%>%
+  arrange(region)
+
+koreas <- korea %>% filter(region %in% c("North Korea","South Korea"))
+
+ggplot(koreas, aes(x=Year, y=Medallas_anyo, group=region, color=region)) +
+  geom_point(alpha=0.6) +
+  geom_abline(intercept=0, slope=1, linetype="dashed") +
+  geom_smooth(method="lm", se=FALSE) +
+  labs(title = "Crecimiento medallero de las dos Coreas") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  guides(color=guide_legend(reverse=TRUE))
+
+```
+
+## Bibliografía. {.smaller}
+
+De aquí sacamos los datos de [120 years of Olympic history: athletes and results](http://https://www.kaggle.com/heesoo37/120-years-of-olympic-history-athletes-and-results).
+
+Trabajos que nos han inspirado:
+
+- [Olympic history data: thorough analysis](https://www.kaggle.com/heesoo37/olympic-history-data-a-thorough-analysis)
+
+- [Holding an Olympic Games means evoking history](https://www.kaggle.com/josephgpinto/holding-an-olympic-games-means-evoking-history)
+
+De aquí sacamos los datos de [Olympic Track & Field Results](http://https://www.kaggle.com/jayrav13/olympic-track-field-results)
+
+De aquí sacamos el diseño del [histograma](#https://t-redactyl.io/blog/2016/02/creating-plots-in-r-using-ggplot2-part-7-histograms.html) de 100 metros.
+
+## Esperamos que os haya gustado nuestro trabajo
+
+- [Aquí](https://github.com/manujimenez62/trabajo_BigData_equipo) podéis encontrar el repositorio de Github con el trabajo.
+
+
+```{r eval = TRUE, echo = FALSE, out.width = "50%", fig.align = "center"}
+knitr::include_graphics(here::here("imagenes", "black_power.jpg"))
+```
+
